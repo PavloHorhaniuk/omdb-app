@@ -2,36 +2,38 @@
 <html lang="uk">
 
 <head>
-  <meta charset="utf-8" />
-  <title>OMDb Search (Vite + Handlebars)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMDb + User Cards</title>
+
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
-  <script type="module" crossorigin src="/omdb-app/assets/index-BmE7jGEk.js"></script>
+  <script type="module" crossorigin src="/omdb-app/assets/index-Bf02uJLd.js"></script>
   <link rel="stylesheet" crossorigin href="/omdb-app/assets/index-9_sLOl-S.css">
 </head>
 
 <body>
-  <form class="search-form" id="search-form">
-    <input type="text" name="query" autocomplete="off" placeholder="Search movies..." />
+  <form class="search-form" id="search-form" autocomplete="off">
+    <input type="text" name="query" placeholder="Пошук фільмів (OMDb)..." />
     <select name="type">
       <option value="">All</option>
-      <option value="movie">Movies</option>
+      <option value="movie">Movie</option>
       <option value="series">Series</option>
-      <option value="episode">Episodes</option>
+      <option value="episode">Episode</option>
     </select>
-    <input type="number" name="year" placeholder="Year" min="1900" max="2100" />
+    <input type="text" name="year" placeholder="Year" />
     <button type="submit">Search</button>
   </form>
 
-  <div class="row gap" style="margin-bottom:16px">
-    <button id="add-card-btn" class="btn btn-primary" type="button">+ Додати картку</button>
-    <button id="my-cards-btn" class="btn" type="button">Мої картки</button>
+  <div class="controls">
+    <button id="add-card-btn" class="btn btn-primary">+ Додати картку</button>
+    <button id="my-cards-btn" class="btn">Мої картки</button>
+    <button id="public-cards-btn" class="btn">Публічні картки</button>
   </div>
 
-  <ul class="gallery" id="gallery"></ul>
+  <ul class="gallery"></ul>
 
   <div class="controls">
-    <button id="load-more" hidden>Load more</button>
+    <button id="load-more" class="btn" style="display:none">Load more</button>
   </div>
 
 </body>
