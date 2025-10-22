@@ -1,16 +1,13 @@
-// ====== ENV & CONSTANTS ======
+// ====== ENV ======
 const API_BASE =
   (import.meta.env && import.meta.env.VITE_API_BASE) ||
   window.API_BASE ||
   "";
 
-if (!API_BASE) {
-  console.warn("VITE_API_BASE is empty. Set it in .env or .env.production");
-}
+if (!API_BASE) console.warn("VITE_API_BASE is empty");
 
-// ====== SIMPLE NOTIFY (PNotify-лайт) ======
+// ====== NOTIFY ======
 function notify(type, msg) {
-  // type: success | error | info
   const box = document.createElement("div");
   box.className = `toast ${type}`;
   box.textContent = msg;
@@ -24,7 +21,7 @@ function notify(type, msg) {
 const notifyOk = (m) => notify("success", m);
 const notifyError = (m) => notify("error", m);
 
-// ====== TOKEN (x-user-token) ======
+// ====== TOKENS ======
 function getOrCreateUserToken() {
   let t = localStorage.getItem("omdbUserToken");
   if (!t) {
@@ -33,94 +30,141 @@ function getOrCreateUserToken() {
   }
   return t;
 }
-function authHeaders() {
-  return { "x-user-token": getOrCreateUserToken() };
-}
+function authHeaders() { return { "x-user-token": getOrCreateUserToken() }; }
 
 // ====== HELPERS ======
-async function safeJson(r) {
-  try {
-    return await r.json();
-  } catch {
-    return null;
-  }
-}
-function clearFieldErrors(form) {
-  form.querySelectorAll(".invalid").forEach((el) => el.classList.remove("invalid"));
-}
+async function safeJson(r) { try { return await r.json() } catch { return null } }
+function escapeHtml(s = "") { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") }
+function escapeAttr(s = "") { return escapeHtml(s).replace(/`/g, "\\`") }
+function clearFieldErrors(form) { form.querySelectorAll(".invalid").forEach(el => el.classList.remove("invalid")) }
 function highlightFormErrors(form, errors = []) {
   clearFieldErrors(form);
   if (!Array.isArray(errors)) return;
-  for (const err of errors) {
-    const field = err?.field;
-    if (!field) continue;
-    const el =
-      form.querySelector(`[name="${field}"]`) ||
-      form.querySelector(`[data-field="${field}"]`);
+  for (const e of errors) {
+    const field = e?.field;
+    const el = form.querySelector(`[name="${field}"]`) || form.querySelector(`[data-field="${field}"]`);
     if (el) el.classList.add("invalid");
   }
 }
 function absoluteUploadUrl(pathLike) {
   if (!pathLike) return null;
-  return pathLike.startsWith("/")
-    ? `${API_BASE}${pathLike}`
-    : pathLike;
+  return pathLike.startsWith("/") ? `${API_BASE}${pathLike}` : pathLike;
 }
+async function wakeServer() { try { await fetch(`${API_BASE}/health`, { cache: "no-store" }); } catch { } }
 
-// ====== UI ROOTS ======
+// ====== DOM refs ======
 const galleryEl = document.querySelector(".gallery");
-const addBtn = document.getElementById("add-card-btn") || createAddButtons();
-
-// Create minimal UI if missing (for safety)
-function createAddButtons() {
-  const bar = document.createElement("div");
-  bar.className = "controls";
-  const btn1 = document.createElement("button");
-  btn1.id = "add-card-btn";
-  btn1.className = "btn btn-primary";
-  btn1.textContent = "Додати картку";
-  const btn2 = document.createElement("button");
-  btn2.id = "my-cards-btn";
-  btn2.className = "btn";
-  btn2.textContent = "Мої картки";
-  bar.append(btn1, btn2);
-  document.body.prepend(bar);
-  return btn1;
-}
-
-// ====== OMDb (для пошуку) — базовий рендер ======
 const searchForm = document.getElementById("search-form");
-if (searchForm) {
-  searchForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const q = searchForm.querySelector('[name="query"]').value.trim();
-    await doSearch(q);
-  });
+const addBtn = document.getElementById("add-card-btn");
+const myBtn = document.getElementById("my-cards-btn");
+const pubBtn = document.getElementById("public-cards-btn");
+const loadMoreBtn = document.getElementById("load-more");
+
+// ====== MODES & PAGINATION STATE ======
+let mode = "public";                 // "public" | "omdb"
+let omdbQuery = "";                  // поточний OMDb запит
+let omdbType = "";                  // тип (movie/series/episode)
+let omdbYear = "";                  // рік
+let omdbPage = 1;                   // сторінка OMDb
+let omdbHasMore = false;
+
+let publicPage = 1;                  // сторінка публічних карток
+let publicHasMore = true;            // доки сервер каже, що є
+
+const PAGE_SIZE = 12;
+
+// ====== INIT ======
+(() => {
+  getOrCreateUserToken();
+  // Стартуємо з публічних карток
+  switchToPublic(true);
+})();
+
+// ====== SWITCHERS ======
+pubBtn?.addEventListener("click", () => switchToPublic(true));
+searchForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = searchForm.querySelector('[name="query"]').value.trim();
+  omdbType = searchForm.querySelector('[name="type"]').value.trim();
+  omdbYear = searchForm.querySelector('[name="year"]').value.trim();
+  switchToOmdb(q, true);
+});
+
+function switchToPublic(reset) {
+  mode = "public";
+  loadMoreBtn.style.display = "inline-block";
+  if (reset) {
+    publicPage = 1;
+    publicHasMore = true;
+    galleryEl.innerHTML = "";
+  }
+  loadPublicCards();
 }
 
-async function doSearch(q, page = 1) {
-  if (!q) return;
-  try {
-    await wakeServer();
-    const url = new URL(`${API_BASE}/proxy/omdb`);
-    url.searchParams.set("q", q);
-    url.searchParams.set("page", String(page));
-    const r = await fetch(url);
-    const data = await r.json();
-    if (!r.ok || data?.Error) {
-      throw new Error(data?.error || data?.Error || `HTTP ${r.status}`);
+function switchToOmdb(query, reset) {
+  mode = "omdb";
+  omdbQuery = query;
+  loadMoreBtn.style.display = "inline-block";
+  if (reset) {
+    omdbPage = 1;
+    omdbHasMore = false;
+    galleryEl.innerHTML = "";
+  }
+  doSearch(omdbQuery, omdbPage, reset);
+}
+
+// ====== LOAD MORE ======
+loadMoreBtn?.addEventListener("click", async () => {
+  if (mode === "public") {
+    if (!publicHasMore) { notify("info", "Більше карток немає"); return; }
+    publicPage += 1;
+    await loadPublicCards();
+  } else {
+    if (!omdbHasMore) { notify("info", "Більше результатів немає"); return; }
+    omdbPage += 1;
+    await doSearch(omdbQuery, omdbPage, false);
+  }
+});
+
+// ====== RENDER MIX ======
+function renderUserCards(items, append = true) {
+  if (!galleryEl) return;
+  if (!append) galleryEl.innerHTML = "";
+  for (const c of items) {
+    const li = document.createElement("li");
+    li.className = "photo-card";
+    const img = document.createElement("img");
+    if (c.payload.imageUrl) {
+      img.src = absoluteUploadUrl(c.payload.imageUrl);
+    } else {
+      img.src = "";
     }
-    renderMovies(data.Search || []);
-    notifyOk("Готово");
-  } catch (e) {
-    console.error(e);
-    notifyError(`Помилка запиту: ${e.message || e}`);
+    img.alt = c.payload.title || "";
+    img.loading = "lazy";
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = c.payload.title || "(без назви)";
+
+    const meta = document.createElement("div");
+    meta.className = "card-sub";
+    meta.textContent = `${c.payload.movieTitle || ""} • ${c.payload.name || ""}`;
+
+    const row = document.createElement("div");
+    row.className = "stats";
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = "user";
+    row.append(badge);
+
+    li.append(img, title, meta, row);
+    galleryEl.append(li);
   }
 }
 
-function renderMovies(list) {
+function renderMovies(list, append = true) {
   if (!galleryEl) return;
-  galleryEl.innerHTML = "";
+  if (!append) galleryEl.innerHTML = "";
   for (const m of list) {
     const li = document.createElement("li");
     li.className = "photo-card";
@@ -146,7 +190,67 @@ function renderMovies(list) {
   }
 }
 
-// ====== COMMENTS (мінімально — тільки перегляд/додавання) ======
+// ====== PUBLIC CARDS API ======
+async function loadPublicCards() {
+  try {
+    await wakeServer();
+    const url = new URL(`${API_BASE}/cards`);
+    url.searchParams.set("onlyPublic", "true");
+    url.searchParams.set("page", String(publicPage));
+    url.searchParams.set("limit", String(PAGE_SIZE));
+    const r = await fetch(url.toString());
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+
+    renderUserCards(data.data || [], true);
+    // Has more?
+    const shown = publicPage * PAGE_SIZE;
+    publicHasMore = shown < (data.total || 0);
+    loadMoreBtn.style.display = publicHasMore ? "inline-block" : "none";
+
+    if (publicPage === 1 && (!data.data || data.data.length === 0)) {
+      notify("info", "Поки що публічних карток немає");
+    }
+  } catch (e) {
+    console.error(e);
+    notifyError(`Помилка завантаження публічних карток: ${e.message || e}`);
+  }
+}
+
+// ====== OMDB SEARCH ======
+async function doSearch(q, page = 1, reset = false) {
+  if (!q) {
+    notify("info", "Введи запит у полі пошуку");
+    return;
+  }
+  try {
+    await wakeServer();
+    const url = new URL(`${API_BASE}/proxy/omdb`);
+    url.searchParams.set("q", q);
+    url.searchParams.set("page", String(page));
+    if (omdbType) url.searchParams.set("type", omdbType);
+    if (omdbYear) url.searchParams.set("y", omdbYear);
+
+    const r = await fetch(url.toString());
+    const data = await r.json();
+    if (!r.ok || data?.Error) throw new Error(data?.error || data?.Error || `HTTP ${r.status}`);
+
+    const list = data.Search || [];
+    renderMovies(list, !reset);
+
+    // omdb has up to ~10 results per page by default; визначимо hasMore:
+    const total = Number(data.totalResults || 0);
+    omdbHasMore = (page * list.length) < total;
+    loadMoreBtn.style.display = omdbHasMore ? "inline-block" : "none";
+
+    if (reset && list.length === 0) notify("info", "Нічого не знайдено");
+  } catch (e) {
+    console.error(e);
+    notifyError(`Помилка запиту: ${e.message || e}`);
+  }
+}
+
+// ====== COMMENTS (простий варіант) ======
 async function openCommentsModal(imdbID, title) {
   const wrap = document.createElement("div");
   wrap.className = "modal";
@@ -168,26 +272,27 @@ async function openCommentsModal(imdbID, title) {
     </form>
   `;
   const overlay = openLightbox(wrap);
-
   const listEl = wrap.querySelector("#comments-list");
   const form = wrap.querySelector("#comment-form");
   wrap.querySelector("#close-modal").onclick = overlay.close;
 
-  await loadComments();
+  await load();
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     clearFieldErrors(form);
-    const name = form.name.value.trim();
-    const message = form.message.value.trim();
-    const rating = Number(form.rating.value) || 5;
-    const payload = { kind: "comment", imdbID, name, message, rating };
-
+    const payload = {
+      kind: "comment",
+      imdbID,
+      name: form.name.value.trim(),
+      message: form.message.value.trim(),
+      rating: Number(form.rating.value) || 5
+    };
     try {
       const r = await fetch(`${API_BASE}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload)
       });
       const data = await safeJson(r);
       if (!r.ok) {
@@ -195,32 +300,28 @@ async function openCommentsModal(imdbID, title) {
         throw new Error(data?.error || `HTTP ${r.status}`);
       }
       form.reset();
-      await loadComments();
+      await load();
       notifyOk("Коментар додано");
     } catch (e) {
       notifyError(`Не вдалося додати: ${e.message || e}`);
     }
   });
 
-  async function loadComments() {
-    const r = await fetch(`${API_BASE}/comments?imdbID=${encodeURIComponent(imdbID)}`, {
-      headers: authHeaders(),
-    });
+  async function load() {
+    const r = await fetch(`${API_BASE}/comments?imdbID=${encodeURIComponent(imdbID)}`);
     const data = await r.json();
-    listEl.innerHTML = (data.data || [])
-      .map(
-        (c) => `
-        <div class="comment">
-          <div class="meta">${escapeHtml(c.payload.name)} • ${new Date(c.createdAt).toLocaleString()} • <span class="rating">★${c.payload.rating}</span></div>
-          <div class="text">${escapeHtml(c.payload.message)}</div>
-        </div>`
-      )
-      .join("");
+    listEl.innerHTML = (data.data || []).map(c => `
+      <div class="comment">
+        <div class="meta">${escapeHtml(c.payload.name)} • ${new Date(c.createdAt).toLocaleString()} • <span class="rating">★${c.payload.rating}</span></div>
+        <div class="text">${escapeHtml(c.payload.message)}</div>
+      </div>
+    `).join("");
   }
 }
 
-// ====== ADD USER CARD (З АПЛОУДОМ ФОТО) ======
-document.getElementById("add-card-btn")?.addEventListener("click", openCreateCard);
+// ====== CREATE / MY CARDS (з аплоудом) ======
+addBtn?.addEventListener("click", openCreateCard);
+myBtn?.addEventListener("click", openMyCards);
 
 function openCreateCard() {
   const wrap = document.createElement("div");
@@ -234,7 +335,7 @@ function openCreateCard() {
       <textarea name="description" placeholder="Опис"></textarea>
 
       <div class="muted">Зображення (один із варіантів):</div>
-      <input type="url" name="imageUrl" placeholder="Посилання на зображення (необов’язково)" />
+      <input type="url"  name="imageUrl"  placeholder="Посилання на зображення (необов’язково)" />
       <input type="file" name="imageFile" accept="image/*" />
 
       <div class="preview" data-field="image"></div>
@@ -248,8 +349,6 @@ function openCreateCard() {
         <button type="submit" class="btn btn-primary">Створити</button>
         <button type="button" class="btn" id="cancel-create">Скасувати</button>
       </div>
-
-      <div class="muted">Зображення з файлу зберігається на сервері. URL можна вставити зовнішній (imgur тощо).</div>
     </form>
   `;
   const overlay = openLightbox(wrap);
@@ -284,21 +383,18 @@ function openCreateCard() {
 
     try {
       await wakeServer();
-
-      // Якщо обрали файл — спочатку аплоудимо
       if (file) {
-        imageUrl = await uploadImage(file); // повертає /uploads/.... на бекенді
+        imageUrl = await uploadImage(file);
         imageUrl = absoluteUploadUrl(imageUrl);
       }
 
-      // Збираємо payload (imageUrl необов'язкове)
       const payload = { name, movieTitle, title, description, isPublic };
       if (imageUrl) payload.imageUrl = imageUrl;
 
       const r = await fetch(`${API_BASE}/cards`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload)
       });
       const data = await safeJson(r);
       if (!r.ok) {
@@ -307,7 +403,11 @@ function openCreateCard() {
       }
       notifyOk("Картку створено");
       overlay.close();
-      // за бажанням — онови мої картки
+
+      // якщо ми в публічному режимі і картка публічна — перезавантажимо стрічку з початку
+      if (mode === "public" && isPublic) {
+        switchToPublic(true);
+      }
     } catch (e) {
       notifyError(`Помилка створення: ${e.message || e}`);
     }
@@ -316,20 +416,12 @@ function openCreateCard() {
 
 async function uploadImage(file) {
   const form = new FormData();
-  form.append("image", file); // ВАЖЛИВО: ключ має бути "image"
-  const r = await fetch(`${API_BASE}/upload`, {
-    method: "POST",
-    body: form, // НЕ ставимо Content-Type вручну!
-  });
+  form.append("image", file); // ключ має бути "image"
+  const r = await fetch(`${API_BASE}/upload`, { method: "POST", body: form });
   const data = await safeJson(r);
-  if (!r.ok) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
-  }
-  return data.url; // типу: /uploads/xxxxx.webp
+  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+  return data.url; // /uploads/....
 }
-
-// ====== MY CARDS (список) ======
-document.getElementById("my-cards-btn")?.addEventListener("click", openMyCards);
 
 async function openMyCards() {
   const wrap = document.createElement("div");
@@ -349,9 +441,7 @@ async function openMyCards() {
   async function load() {
     const r = await fetch(`${API_BASE}/cards`, { headers: authHeaders() });
     const data = await r.json();
-    list.innerHTML = (data.data || [])
-      .map((c) => renderCardRow(c))
-      .join("");
+    list.innerHTML = (data.data || []).map(renderCardRow).join("");
     attachRowHandlers();
   }
 
@@ -376,36 +466,27 @@ async function openMyCards() {
   }
 
   function attachRowHandlers() {
-    list.querySelectorAll(".remove").forEach((btn) =>
-      btn.addEventListener("click", async (e) => {
-        const row = e.target.closest(".card-row");
-        const id = row.dataset.id;
-        if (!confirm("Видалити картку?")) return;
-        const r = await fetch(`${API_BASE}/cards/${id}`, {
-          method: "DELETE",
-          headers: authHeaders(),
-        });
-        const d = await safeJson(r);
-        if (!r.ok) return notifyError(d?.error || `HTTP ${r.status}`);
-        notifyOk("Видалено");
-        await load();
-      })
-    );
+    list.querySelectorAll(".remove").forEach(btn => btn.addEventListener("click", async (e) => {
+      const row = e.target.closest(".card-row");
+      const id = row.dataset.id;
+      if (!confirm("Видалити картку?")) return;
+      const r = await fetch(`${API_BASE}/cards/${id}`, { method: "DELETE", headers: authHeaders() });
+      const d = await safeJson(r);
+      if (!r.ok) return notifyError(d?.error || `HTTP ${r.status}`);
+      notifyOk("Видалено");
+      await load();
+    }));
 
-    list.querySelectorAll(".edit").forEach((btn) =>
-      btn.addEventListener("click", async (e) => {
-        const row = e.target.closest(".card-row");
-        const id = row.dataset.id;
-        openEditCard(id);
-      })
-    );
+    list.querySelectorAll(".edit").forEach(btn => btn.addEventListener("click", async (e) => {
+      const row = e.target.closest(".card-row");
+      openEditCard(row.dataset.id);
+    }));
   }
 
   async function openEditCard(id) {
-    // підвантажимо актуальні дані
     const r = await fetch(`${API_BASE}/cards`, { headers: authHeaders() });
     const data = await r.json();
-    const card = (data.data || []).find((x) => x.id === id);
+    const card = (data.data || []).find(x => x.id === id);
     if (!card) return notifyError("Картку не знайдено");
 
     const w = document.createElement("div");
@@ -422,10 +503,7 @@ async function openMyCards() {
         <input type="url" name="imageUrl" value="${escapeAttr(absoluteUploadUrl(card.payload.imageUrl) || "")}" placeholder="Посилання на зображення (необов’язково)" />
         <input type="file" name="imageFile" accept="image/*" />
         <div class="preview" data-field="image">
-          ${card.payload.imageUrl
-        ? `<img src="${escapeAttr(absoluteUploadUrl(card.payload.imageUrl))}" alt="">`
-        : ""
-      }
+          ${card.payload.imageUrl ? `<img src="${escapeAttr(absoluteUploadUrl(card.payload.imageUrl))}" alt="">` : ""}
         </div>
 
         <label class="row gap" style="margin-top:4px;">
@@ -464,23 +542,24 @@ async function openMyCards() {
         movieTitle: form.movieTitle.value.trim(),
         title: form.title.value.trim(),
         description: form.description.value.trim(),
-        isPublic: form.isPublic.checked,
+        isPublic: form.isPublic.checked
       };
 
       let imageUrl = form.imageUrl.value.trim() || null;
       const file = fileInput.files?.[0];
+
       try {
         if (file) {
           imageUrl = await uploadImage(file);
           imageUrl = absoluteUploadUrl(imageUrl);
         }
         if (imageUrl) patch.imageUrl = imageUrl;
-        else patch.imageUrl = null; // дозволяємо прибрати картинку
+        else patch.imageUrl = null; // дозволяємо прибрати
 
         const r = await fetch(`${API_BASE}/cards/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify(patch),
+          body: JSON.stringify(patch)
         });
         const data = await safeJson(r);
         if (!r.ok) {
@@ -490,6 +569,9 @@ async function openMyCards() {
         notifyOk("Збережено");
         ov.close();
         await load();
+
+        // якщо картка стала публічною — оновимо стрічку public, якщо ми в ній
+        if (mode === "public") switchToPublic(true);
       } catch (e) {
         notifyError(`Помилка збереження: ${e.message || e}`);
       }
@@ -497,7 +579,7 @@ async function openMyCards() {
   }
 }
 
-// ====== Lightbox (дуже простий) ======
+// ====== Lightbox (простий) ======
 function openLightbox(contentEl) {
   const overlay = document.createElement("div");
   overlay.className = "lb";
@@ -507,37 +589,6 @@ function openLightbox(contentEl) {
   overlay.append(inner);
   document.body.append(overlay);
   const close = () => overlay.remove();
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   return { close };
 }
-
-// ====== small utils ======
-function escapeHtml(s = "") {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-function escapeAttr(s = "") {
-  return escapeHtml(s).replace(/`/g, "\\`");
-}
-
-// ====== wake server (Render free) ======
-async function wakeServer() {
-  try {
-    await fetch(`${API_BASE}/health`, { cache: "no-store" });
-  } catch { }
-}
-
-// ====== INIT (опційно авто-пошук) ======
-(async () => {
-  getOrCreateUserToken();
-  // початковий пошук (для прикладу)
-  const input = document.querySelector('#search-form input[name="query"]');
-  if (input && input.value.trim()) {
-    doSearch(input.value.trim());
-  }
-})();
