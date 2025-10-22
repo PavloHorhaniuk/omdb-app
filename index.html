@@ -6,8 +6,8 @@
   <title>OMDb Search (Vite + Handlebars)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
-  <script type="module" crossorigin src="/omdb-app/assets/index-DwbAyTPY.js"></script>
-  <link rel="stylesheet" crossorigin href="/omdb-app/assets/index-CWjgSNl5.css">
+  <script type="module" crossorigin src="/omdb-app/assets/index-CPaSv9a0.js"></script>
+  <link rel="stylesheet" crossorigin href="/omdb-app/assets/index-DtO0fihm.css">
 </head>
 
 <body>
@@ -22,6 +22,11 @@
     <input type="number" name="year" placeholder="Year" min="1900" max="2100" />
     <button type="submit">Search</button>
   </form>
+
+  <div class="row gap" style="margin-bottom:16px">
+    <button id="add-card-btn" class="btn btn-primary" type="button">+ Додати картку</button>
+    <button id="my-cards-btn" class="btn" type="button">Мої картки</button>
+  </div>
 
   <ul class="gallery" id="gallery"></ul>
 
