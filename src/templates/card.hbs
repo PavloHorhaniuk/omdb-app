@@ -1,0 +1,15 @@
+<li class="photo-card" data-imdb="{{imdbID}}" data-poster="{{posterLarge}}">
+    <img src="{{poster}}" alt="{{Title}}" />
+    <div class="card-title">{{Title}}</div>
+    <div class="card-sub">{{Year}} • {{Type}}</div>
+    <div class="stats">
+        <p class="stats-item">
+            <i class="material-icons">open_in_new</i>
+            <a href="https://www.imdb.com/title/{{imdbID}}/" target="_blank" rel="noopener">IMDb</a>
+        </p>
+        <p class="stats-item">
+            <i class="material-icons">chat</i>
+            <button class="reviews-btn" type="button" data-imdb="{{imdbID}}">Відгуки</button>
+        </p>
+    </div>
+</li>
