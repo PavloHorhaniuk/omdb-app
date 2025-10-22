@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="uk">
+
+<head>
+  <meta charset="utf-8" />
+  <title>OMDb Search (Vite + Handlebars)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+  <script type="module" crossorigin src="/omdb-app/assets/index-DwbAyTPY.js"></script>
+  <link rel="stylesheet" crossorigin href="/omdb-app/assets/index-CWjgSNl5.css">
+</head>
+
+<body>
+  <form class="search-form" id="search-form">
+    <input type="text" name="query" autocomplete="off" placeholder="Search movies..." />
+    <select name="type">
+      <option value="">All</option>
+      <option value="movie">Movies</option>
+      <option value="series">Series</option>
+      <option value="episode">Episodes</option>
+    </select>
+    <input type="number" name="year" placeholder="Year" min="1900" max="2100" />
+    <button type="submit">Search</button>
+  </form>
+
+  <ul class="gallery" id="gallery"></ul>
+
+  <div class="controls">
+    <button id="load-more" hidden>Load more</button>
+  </div>
+
+</body>
+
+</html>
